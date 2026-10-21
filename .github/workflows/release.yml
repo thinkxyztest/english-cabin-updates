@@ -1,0 +1,64 @@
+name: Publish English Cabin update
+on:
+  push:
+    paths:
+      - 'publish/**'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: english-cabin-release
+  cancel-in-progress: false
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify the signed artifact and publish the release
+        shell: python
+        env:
+          RELEASE_TOKEN: ${{ github.token }}
+        run: |
+          import os, json, hashlib, urllib.request, urllib.error, urllib.parse
+          repository = os.environ['GITHUB_REPOSITORY']
+          commit = os.environ['GITHUB_SHA']
+          api = 'https://api.github.com/repos/' + repository
+          headers = {'Authorization': 'Bearer ' + os.environ['RELEASE_TOKEN'], 'Accept': 'application/vnd.github+json', 'User-Agent': 'EnglishCabin-Release'}
+          def request(url, data=None, method='GET', binary=False):
+              body = data if binary else json.dumps(data).encode() if data is not None else None
+              h = dict(headers)
+              if body is not None: h['Content-Type'] = 'application/octet-stream' if binary else 'application/json'
+              with urllib.request.urlopen(urllib.request.Request(url, data=body, headers=h, method=method), timeout=120) as response:
+                  raw = response.read()
+                  return json.loads(raw) if raw else None
+          def raw(path):
+              url = 'https://raw.githubusercontent.com/' + repository + '/' + commit + '/' + path
+              with urllib.request.urlopen(url, timeout=120) as response: return response.read()
+          tree = request(api + '/git/trees/' + commit + '?recursive=1')['tree']
+          paths = [item['path'] for item in tree if item['path'].startswith('publish/') and item['path'].endswith('/update.json')]
+          choices = [(json.loads(raw(path)), path) for path in paths]
+          manifest, path = max(choices, key=lambda pair: pair[0]['versionCode'])
+          tag = path.split('/')[1]
+          assert len(path.split('/')) == 3 and manifest['packageName'] == 'com.familyplay.player'
+          expected = 'https://github.com/' + repository + '/releases/download/' + tag + '/english-cabin.apk'
+          assert manifest['downloadUrl'] == expected
+          apk = raw('publish/' + tag + '/english-cabin.apk')
+          assert len(apk) == manifest['size'] and hashlib.sha256(apk).hexdigest() == manifest['sha256']
+          try:
+              release = request(api + '/releases/tags/' + tag)
+          except urllib.error.HTTPError as error:
+              if error.code != 404: raise
+              release = request(api + '/releases', {'tag_name': tag, 'target_commitish': commit, 'name': '英语舱 ' + manifest['versionName'], 'body': manifest['releaseNotes'], 'draft': True, 'prerelease': False}, method='POST')
+          if not release['draft']:
+              with urllib.request.urlopen('https://github.com/' + repository + '/releases/download/' + tag + '/update.json', timeout=60) as response:
+                  published = json.load(response)
+              assert published['sha256'] == manifest['sha256'], 'Already published; use a new version instead of replacing it'
+              print('Release already published with the expected checksum:', tag)
+          else:
+              for asset in release.get('assets', []): request(api + '/releases/assets/' + str(asset['id']), method='DELETE')
+              upload = release['upload_url'].split('{')[0]
+              files = {'english-cabin.apk': apk, 'update.json': json.dumps(manifest, ensure_ascii=False, indent=2).encode('utf-8'), 'SHA256.txt': (manifest['sha256'] + '  english-cabin.apk\n').encode()}
+              for name, data in files.items():
+                  request(upload + '?name=' + urllib.parse.quote(name), data=data, method='POST', binary=True)
+                  print('Uploaded:', name)
+              request(api + '/releases/' + str(release['id']), {'draft': False, 'make_latest': 'true'}, method='PATCH')
+              print('Published:', release['html_url'])
