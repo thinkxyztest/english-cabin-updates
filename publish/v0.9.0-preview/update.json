@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "packageName": "com.familyplay.player",
+  "versionCode": 22,
+  "versionName": "0.9.0-preview",
+  "minSdk": 26,
+  "size": 4195174,
+  "sha256": "a4d313e6f67097f94c4fe900e123b82aca653a926afbd6033efaa6631af242ea",
+  "downloadUrl": "https://github.com/thinkxyztest/english-cabin-updates/releases/download/v0.9.0-preview/english-cabin.apk",
+  "releaseNotes": "补齐远程片库、封面、计划筛选、设备诊断和执行记录；增加云端更新检查与更明确的下载状态。"
+}
